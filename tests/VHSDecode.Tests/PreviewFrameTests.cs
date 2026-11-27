@@ -246,6 +246,104 @@ public sealed class PreviewFrameTests
         }
     }
 
+    [Theory]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void NtscVhsKeepsParityAcrossDamagedLeadingEqualizers(int equalizers)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+            == System.Runtime.InteropServices.Architecture.X64 && File.Exists(Path.Combine(AppContext.BaseDirectory,
+            "vhsdecode_realtime_preview.dll")), "The Windows x64 Realtime preview library was not staged.");
+        const int rate = 20_000_000;
+        const double halfLine = rate * 1001.0 / (30_000 * 1050);
+        var rf = CvbsTestSignal.Create(false);
+        if (equalizers == 6)
+        {
+            // Widen only the first EQ on integer-line fields to 3.65 us.
+            for (int field = 0; field < 7; field += 2)
+                Array.Fill(rf, (short)-4000, (int)Math.Round(field * 525 * halfLine), 73);
+        }
+        else
+        {
+            // After acquisition, drop or insert one leading EQ on both parities.
+            for (int field = 3; field <= 4; field++)
+            {
+                int slot = field * 525 - (equalizers == 7 ? 1 : 0);
+                int at = (int)Math.Round(slot * halfLine);
+                Array.Fill(rf, (short)3500, at, (int)halfLine - 1);
+                if (equalizers == 7)
+                    Array.Fill(rf, (short)-4000, at, 47);
+            }
+        }
+        ModulateNtscVhs(rf);
+
+        var parity = new List<bool>();
+        using var session = new RealtimePreviewSession(new(PreviewSourceFormat.Vhs, PreviewVideoStandard.Ntsc, rate),
+            field => parity.Add(field.IsTopField));
+        session.Process(rf, 0, TestContext.Current.CancellationToken);
+        Assert.Equal(5, parity.Count);
+        for (int i = 1; i < parity.Count; i++)
+            Assert.NotEqual(parity[i - 1], parity[i]);
+    }
+
+    [Theory]
+    [InlineData(3, true, true)]
+    [InlineData(1, true, false)]
+    [InlineData(0, true, false)]
+    [InlineData(3, false, false)]
+    public void NtscVhsRequiresPulseEvidenceInBothMissingFieldIntervals(
+        int secondBroadCount, bool keepEqualizers, bool recover)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+            == System.Runtime.InteropServices.Architecture.X64 && File.Exists(Path.Combine(AppContext.BaseDirectory,
+            "vhsdecode_realtime_preview.dll")), "The Windows x64 Realtime preview library was not staged.");
+        const int rate = 20_000_000;
+        const double halfLine = rate * 1001.0 / (30_000 * 1050);
+        var rf = CvbsTestSignal.Create(false);
+        for (int field = 3; field <= 4; field++)
+        {
+            // Preserve three nonconsecutive broads in the first damaged field.
+            // The second independently controls whether both patterns qualify.
+            int count = field == 3 ? 3 : secondBroadCount;
+            for (int slot = 0; slot < 12; slot++)
+            {
+                bool keep = slot < 6 ? field == 3 || keepEqualizers
+                    : (slot - 6) % 2 == 0 && (slot - 6) / 2 < count;
+                if (keep) continue;
+                int start = (int)Math.Round((field * 525 + slot) * halfLine);
+                Array.Fill(rf, (short)3500, start, (int)halfLine - 1);
+            }
+        }
+
+        ModulateNtscVhs(rf);
+        var fields = new List<(int Index, bool Top, TimeSpan Timestamp)>();
+        using var session = new RealtimePreviewSession(new(PreviewSourceFormat.Vhs, PreviewVideoStandard.Ntsc, rate),
+            f => fields.Add(((int)Math.Round(f.Timestamp.TotalSeconds * 60_000 / 1001), f.IsTopField, f.Timestamp)));
+        session.Process(rf, 0, TestContext.Current.CancellationToken);
+        int[] expected = recover ? [1, 2, 3, 4, 5] : [1, 5];
+        Assert.Equal(expected, fields.Select(f => f.Index).ToArray());
+        foreach (var field in fields)
+        {
+            Assert.Equal(field.Index % 2 == 0, field.Top);
+            double linesSinceFirst = Math.Floor((field.Index - 1) * 262.5);
+            double elapsed = (field.Timestamp - fields[0].Timestamp).TotalSeconds;
+            Assert.InRange(Math.Abs(elapsed - linesSinceFirst * 2 * halfLine / rate), 0, 5e-6);
+        }
+    }
+
+    private static void ModulateNtscVhs(short[] rf)
+    {
+        const int rate = 20_000_000;
+        double phase = 0;
+        for (int i = 0; i < rf.Length; i++)
+        {
+            double frequency = rf[i] switch { -4000 => 3_400_000, 3500 => 3_686_000, _ => 4_050_000 };
+            phase += 2 * Math.PI * frequency / rate;
+            rf[i] = (short)(12_000 * Math.Sin(phase));
+        }
+    }
+
     [Fact]
     public void HorizontalOnlyInputExpiresFieldLock()
     {
