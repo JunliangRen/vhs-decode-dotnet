@@ -27,16 +27,9 @@ using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDat
 }
 // Exercise both PAL carriers after a reset, which must preserve the audio standard.
 var analog = palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog, InputSampleRateHz = 20_000_000 };
-int audibleLeft = 0, audibleRight = 0;
-using (var session = new RealtimePreviewSession(analog, _ => { }, block =>
-{
-    var pcm = block.InterleavedSamples.Span;
-    for (int i = 0; i < pcm.Length; i += 2)
-    {
-        if (Math.Abs(pcm[i]) > 0.005f) audibleLeft++;
-        if (Math.Abs(pcm[i + 1]) > 0.005f) audibleRight++;
-    }
-}))
+var analogPcm = new List<float>();
+using (var session = new RealtimePreviewSession(analog, _ => { },
+    block => analogPcm.AddRange(block.InterleavedSamples.ToArray())))
 {
     session.Reset();
     var rf = new short[analog.InputSampleRateHz / 20];
@@ -47,7 +40,16 @@ using (var session = new RealtimePreviewSession(analog, _ => { }, block =>
                               + Math.Sin(1066406.25 * t + 10 * Math.Sin(2000 * t))));
     }
     session.Process(rf, 0);
-    if (session.LockStatus.AudioLocked != true || audibleLeft == 0 || audibleRight == 0)
+    if (session.LockStatus.AudioLocked != true || analogPcm.Count != 2 * 2400)
+        throw new InvalidDataException("Unexpected PAL LD audio lock or duration.");
+    // The last 20 ms contain 20 cycles on the left and 40 on the right.
+    int leftCycles = 0, rightCycles = 0;
+    for (int i = analogPcm.Count - 2 * 960; i < analogPcm.Count; i += 2)
+    {
+        if (analogPcm[i - 2] <= 0 && analogPcm[i] > 0) leftCycles++;
+        if (analogPcm[i - 1] <= 0 && analogPcm[i + 1] > 0) rightCycles++;
+    }
+    if (Math.Abs(leftCycles - 20) > 1 || Math.Abs(rightCycles - 40) > 1)
         throw new InvalidDataException("PAL LD failed to decode both analog carriers after reset.");
 }
 var ld = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Ntsc, 40_000_000)
