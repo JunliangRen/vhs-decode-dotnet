@@ -247,6 +247,161 @@ public sealed class PreviewFrameTests
     }
 
     [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void NtscCompositeRecoversPictureAndRequiresMeasuredBurst(bool restore, bool burst, bool transitions = false)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows() &&
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64 &&
+            File.Exists(Path.Combine(AppContext.BaseDirectory, "vhsdecode_realtime_preview.dll")),
+            "The Windows x64 Realtime preview library was not staged.");
+        const int rate = 20_000_000;
+        const double halfLine = rate * 1001.0 / (30_000 * 1050);
+        const double omega = 2 * Math.PI * (315_000_000.0 / 88 + 200) / rate;
+        int fieldCount = transitions ? 32 : 18;
+        var signal = new short[(int)(halfLine * 525 * fieldCount)];
+        Array.Fill(signal, (short)3500);
+        for (int half = 0; half < 525 * fieldCount; half++)
+        {
+            int field = half / 525;
+            int local = half % 525;
+            // Fragment the first broad on a locked boundary. The other five
+            // broads and six equalizers still identify a valid vertical.
+            if (transitions && field == 18 && local == 6) continue;
+            bool vertical = local < 18;
+            if (!vertical && half % 2 != 0) continue;
+            int start = (int)Math.Round(half * halfLine);
+            int pulse = vertical ? local / 6 == 1 ? (int)halfLine - 94 : 47 : 94;
+            Array.Fill(signal, (short)-4000, start, pulse);
+            if (vertical) continue;
+            // -U burst, followed by +V (red) and +U (blue) patches.
+            for (int k = 108; k < 1200 && start + k < signal.Length; k++)
+            {
+                double phase = (start + k) * omega;
+                if (burst && k < 158 && (!transitions || field is < 21 or >= 26))
+                    signal[start + k] = (short)(3500 - 3750 * Math.Sin(phase));
+                if (k >= 210)
+                    signal[start + k] = (short)(13200 + 3600 * (k < 700 ? Math.Cos(phase) : Math.Sin(phase)));
+            }
+        }
+
+        double baseline = signal[0];
+        double alpha = 1 - Math.Exp(-2 * Math.PI * 6000 / rate);
+        for (int n = 0; n < signal.Length; n++)
+        {
+            double ac = signal[n] - baseline;
+            baseline += alpha * ac;
+            signal[n] = (short)Math.Round(ac);
+        }
+
+        var options = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs, PreviewVideoStandard.Ntsc, rate)
+            { Cvbs50Ohms = restore };
+        var fields = new List<PreviewField>();
+        using var session = new RealtimePreviewSession(options, fields.Add);
+        if (transitions)
+        {
+            // Small pushes expose a spurious lock change even inside a VBI.
+            for (int pos = 0; pos < signal.Length; pos += 1024)
+            {
+                int count = Math.Min(1024, signal.Length - pos);
+                session.Process(signal.AsSpan(pos, count), pos, TestContext.Current.CancellationToken);
+                double field = (pos + count) / (525 * halfLine);
+                if (field is >= 16 and < 21 or >= 29.1) Assert.True(session.LockStatus.ColorLocked, $"lost color at {field:F4}, {session.LockStatus}");
+                if (field is >= 23 and < 26)
+                {
+                    Assert.True(session.LockStatus.VerticalLocked);
+                    Assert.False(session.LockStatus.ColorLocked, $"held color at {field:F4}");
+                }
+            }
+            var monochrome = fields.Where(f => f.Timestamp.TotalSeconds * 60000 / 1001 is >= 22 and < 25).ToArray();
+            Assert.NotEmpty(monochrome);
+            foreach (var f in monochrome)
+            {
+                var pixels = f.Bgra.Span;
+                for (int i = 0; i < pixels.Length; i += 4)
+                {
+                    Assert.Equal(pixels[i], pixels[i + 1]);
+                    Assert.Equal(pixels[i], pixels[i + 2]);
+                }
+            }
+        }
+        else session.Process(signal, 0, TestContext.Current.CancellationToken);
+        Assert.True(fields.Count >= 5);
+        Assert.True(session.LockStatus.VerticalLocked);
+        Assert.Equal(burst, session.LockStatus.ColorLocked);
+        foreach (var field in fields.TakeLast(4))
+        {
+            var bgra = field.Bgra.Span;
+            int left = 4 * (120 * field.Width + 120);
+            int right = 4 * (120 * field.Width + 480);
+            if (burst)
+            {
+                Assert.True(bgra[left + 2] > bgra[left] + 15);
+                Assert.True(bgra[right] > bgra[right + 2] + 15);
+            }
+            else
+            {
+                Assert.Equal(bgra[left], bgra[left + 2]);
+                Assert.Equal(bgra[right], bgra[right + 2]);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(3, false, false, true)]
+    [InlineData(3, true, false, true)]
+    [InlineData(6, false, true, true)]
+    [InlineData(1, false, false, false)]
+    public void NtscCompositeChecksVerticalsAgainstMeasuredPulses(int broadCount, bool drift, bool wideEq, bool recover)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows() &&
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64 &&
+            File.Exists(Path.Combine(AppContext.BaseDirectory, "vhsdecode_realtime_preview.dll")),
+            "The Windows x64 Realtime preview library was not staged.");
+        const int rate = 20_000_000;
+        const double halfLine = rate * 1001.0 / (30_000 * 1050);
+        var samples = CvbsTestSignal.Create(false);
+        for (int field = 3; field <= 4; field++)
+        {
+            int origin = (int)Math.Round(field * 525 * halfLine);
+            if (wideEq) Array.Fill(samples, (short)-4000, origin, 94);
+            for (int slot = 0; slot < 6; slot++)
+            {
+                if (broadCount == 6 || (slot % 2 == 0 && slot / 2 < broadCount)) continue;
+                int at = (int)Math.Round((field * 525 + 6 + slot) * halfLine);
+                Array.Fill(samples, (short)3500, at, (int)halfLine - 1);
+            }
+            if (drift)
+            {
+                int length = (int)Math.Round(18 * halfLine);
+                for (int i = 0; i < length; i++)
+                    samples[origin + i] += (short)(5000 * i / length);
+            }
+        }
+
+        var fields = new List<(int Number, bool Top, long Delivered)>();
+        long end = 0;
+        using var receiver = new RealtimePreviewSession(new(PreviewSourceFormat.Cvbs, PreviewVideoStandard.Ntsc, rate),
+            f => fields.Add(((int)Math.Round(f.Timestamp.TotalSeconds * 60_000 / 1001), f.IsTopField, end)));
+        for (int pos = 0; pos < samples.Length; pos += 8192)
+        {
+            int count = Math.Min(8192, samples.Length - pos);
+            end = pos + count;
+            receiver.Process(samples.AsSpan(pos, count), pos, TestContext.Current.CancellationToken);
+        }
+        int[] expected = recover ? [1, 2, 3, 4, 5] : [1, 5];
+        Assert.Equal(expected, fields.Select(f => f.Number).ToArray());
+        Assert.All(fields, f => Assert.Equal(f.Number % 2 == 0, f.Top));
+        if (recover)
+            Assert.All(fields.Zip(fields.Skip(1)), pair =>
+                Assert.InRange((pair.Second.Delivered - pair.First.Delivered) / (double)rate, .015, .019));
+    }
+
+    [Theory]
     [InlineData(5)]
     [InlineData(6)]
     [InlineData(7)]

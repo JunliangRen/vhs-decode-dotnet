@@ -211,6 +211,9 @@ struct gui_rf_decoder {
     gui_ld_rf_demod_t ld_demod;
     int cvbs_mode; /* 0: RF, 1: direct composite, 2: DdD AC restoration */
     cvbs_frontend_t cvbs;
+    uint64_t cvbs_sync_retry;
+    double cvbs_checked_start;
+    double cvbs_pending_candidate_start;
     bool full_frame;   /* Active/Full display mode (see set_frame_mode). */
     float *storage, *luma, *sync, *ci, *cq, *envelope, *sync_luma, *secam_fm;
     uint8_t *rgba;
@@ -434,6 +437,9 @@ static rf_complex_t rf_color_at(const gui_rf_decoder_t *d, double line_start,
      * backward picture filter must not import future active C into burst. */
     double pos = line_start + offset + d->chroma_delay - d->sync_delay;
     rf_complex_t z = {rf_read(d,d->ci,pos),rf_read(d,d->cq,pos)};
+    /* Direct NTSC I/Q is mixed on the input sample clock. The measured
+     * burst already carries the phase reference for this line. */
+    if (d->cvbs_mode && d->format==GUI_RF_NTSC) return z;
     double nominal = d->p.line_us * 5.0;
     double timing = line_start-field_start-line*nominal
                   + offset*(1.0-nominal/line_period);
@@ -617,6 +623,7 @@ static void rf_reacquire_sync(gui_rf_decoder_t *d) {
     d->eq_run=d->v_run=d->candidate_v_run=0;
     d->have_short_broad=d->have_split_broad=false;
     d->split_follow_count=0;
+    d->cvbs_pending_candidate_start=0;
     d->ready_fields=0;d->have_field=false;
     d->have_luma_wow=false;d->luma_wow=1.0;
     d->display_levels_valid=false;
@@ -1682,6 +1689,11 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
     double common_phase=atan2(common.im,common.re)-RF_PI;
     double coherence=burst_count ? hypot(common.re,common.im)/burst_count : 0.0;
     color = burst_count>rows*3/4 && coherence>(d->format==GUI_RF_PAL ? .40 : .65);
+    /* A small source/ADC clock offset can turn the burst through a full
+     * revolution across one field while consecutive lines still agree.
+     * The renderer uses each line's measured burst, so test that evidence. */
+    if (d->cvbs_mode && d->format==GUI_RF_NTSC && burst_count>rows*3/4 &&
+        dot_sum>.85*(rows-1)) color=true;
     if (!color) rf_color_loss(d,burst_count<=rows*3/4
         ? "insufficient valid color bursts" :
           laserdisc ? "incoherent composite burst phase" : "incoherent tape track/burst phase");
@@ -1793,7 +1805,8 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
          * once from a validated multi-line H grid, never individual rows. */
         double pixel_step=(win_end_us-win_start_us)*5.0*scale/d->p.width;
         double first_offset=win_start_us*5.0*scale+pixel_step*.5;
-        double carrier_scale=2.0*RF_PI*d->p.carrier_hz/RF_VIDEO_RATE;
+        double carrier_scale=d->cvbs_mode && d->format==GUI_RF_NTSC ? 0.0
+            : 2.0*RF_PI*d->p.carrier_hz/RF_VIDEO_RATE;
         /* Chroma timing follows the actual demodulated line number: Full
          * mode starts at line 0, so VBI rows keep their true burst phase
          * instead of an active-line-shifted one (wrong hue on VBI rows). */
@@ -1870,17 +1883,31 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
     return true;
 }
 
-/* Locate a damaged NTSC vertical interval in the buffered sync plane. Only
- * search the phase bracketed by two accepted V references. Require actual
+static bool rf_ntsc_pulse_slice(const gui_rf_decoder_t *d, uint64_t at, double *slice) {
+    if (!d->cvbs_mode) {
+        *slice=(d->sync_est+d->blank_est)*.5;
+        return true;
+    }
+    /* During AC-coupled composite VBI the baseline can move by half the
+     * sync span. Use the porch before THIS edge and the interior of its tip. */
+    double porch=d->sync[(at-6)&RF_RING_MASK],tip=d->sync[(at+8)&RF_RING_MASK];
+    if (porch-tip < .45*(d->blank_est-d->sync_est)) return false;
+    *slice=(porch+tip)*.5;
+    return true;
+}
+
+/* Locate a damaged NTSC vertical interval near the supplied field phase
+ * in the buffered sync plane. Require actual
  * narrow pre-equalizers and serrated broad pulses on the same half-line grid. */
 static bool rf_ntsc_buffered_boundary(const gui_rf_decoder_t *d, double expected,
                                       int parity, double period, double *boundary) {
-    double threshold=(d->sync_est+d->blank_est)*.5;
     double first_broad=expected+(parity==0 ? 4.0 : 3.5)*period;
     for (int slot=0; slot<6; ++slot) {
         double center=first_broad+slot*.5*period;
         for (uint64_t t=(uint64_t)(center-.30*period); t<=(uint64_t)(center+.30*period); ++t) {
-            if (d->sync[(t-1)&RF_RING_MASK]<threshold || d->sync[t&RF_RING_MASK]>=threshold) continue;
+            double edge;
+            if (!rf_ntsc_pulse_slice(d,t,&edge) ||
+                d->sync[(t-1)&RF_RING_MASK]<edge || d->sync[t&RF_RING_MASK]>=edge) continue;
             double origin=(double)t-slot*.5*period;
             int broad=0, narrow=0;
             /* At 5 MHz the probes are 1.6, 4, 11.2, 20 and 29.8 us
@@ -1888,11 +1915,12 @@ static bool rf_ntsc_buffered_boundary(const gui_rf_decoder_t *d, double expected
              * a broad must span both interior probes and end before the next slot. */
             for (int j=-6; j<6; ++j) {
                 uint64_t at=(uint64_t)llround(origin+j*.5*period);
-                if (d->sync[(at+8)&RF_RING_MASK]>=threshold ||
-                    d->sync[(at+149)&RF_RING_MASK]<threshold) continue;
-                bool middle=d->sync[(at+56)&RF_RING_MASK]<threshold;
-                bool late=d->sync[(at+100)&RF_RING_MASK]<threshold;
-                if (j<0 && d->sync[(at+20)&RF_RING_MASK]>=threshold && !middle && !late) narrow++;
+                double slice;
+                if (!rf_ntsc_pulse_slice(d,at,&slice) || d->sync[(at+8)&RF_RING_MASK]>=slice ||
+                    d->sync[(at+149)&RF_RING_MASK]<slice) continue;
+                bool middle=d->sync[(at+56)&RF_RING_MASK]<slice;
+                bool late=d->sync[(at+100)&RF_RING_MASK]<slice;
+                if (j<0 && d->sync[(at+20)&RF_RING_MASK]>=slice && !middle && !late) narrow++;
                 if (j>=0 && middle && late) broad++;
             }
             if (broad>=3 && narrow>=3) {
@@ -1902,6 +1930,54 @@ static bool rf_ntsc_buffered_boundary(const gui_rf_decoder_t *d, double expected
         }
     }
     return false;
+}
+
+/* A fragmented VBI can produce another sequence of three broads before
+ * the buffered check, or after this same boundary was already accepted.
+ * Only reconcile candidates inside that VBI on an established line map. */
+static bool rf_cvbs_reconcile_candidate(gui_rf_decoder_t *d, double pulse) {
+    if (!d->cvbs_mode || d->format!=GUI_RF_NTSC || !d->have_field ||
+        !d->status.h_locked || !d->status.v_locked) return false;
+    double line=d->p.line_us*5.0;
+    if (fabs((double)d->last_level_field-d->field_start)>line) return false;
+    double offset=(pulse-d->field_start)/line;
+    if (offset>=3 && offset<=8) return true;
+    offset-=d->field_parity==0 ? 263 : 262;
+    if (offset<3 || offset>7.5 || d->cvbs_checked_start==d->field_start) return false;
+    d->cvbs_pending_candidate_start=d->field_start;
+    return true;
+}
+
+/* A split broad pulse can interrupt the streaming three-pulse detector.
+ * Once the complete vertical interval has arrived, check its measured
+ * equalizers and broads on the expected half-line grid. Try once per field
+ * and only after a validated line map at the preceding boundary. */
+static void rf_cvbs_check_vertical(gui_rf_decoder_t *d, uint64_t now,
+                                   gui_rf_frame_callback_t callback, void *context) {
+    if (!d->have_field || !d->status.h_locked || !d->status.fields_decoded ||
+        d->cvbs_checked_start==d->field_start) return;
+    double nominal=d->p.line_us*5.0;
+    double expected=d->field_start+(d->field_parity==0 ? 263 : 262)*nominal;
+    if ((double)now<expected+7.5*nominal) return;
+    d->cvbs_checked_start=d->field_start;
+    bool pending=d->cvbs_pending_candidate_start==d->field_start && d->field_start>0;
+    d->cvbs_pending_candidate_start=0;
+    if ((double)now>expected+9*nominal ||
+        fabs((double)d->last_level_field-d->field_start)>nominal) {
+        if (pending) rf_reject_field(d,RF_REJECT_CADENCE,"unconfirmed composite vertical candidate");
+        return;
+    }
+    double start;
+    int parity=1-d->field_parity;
+    if (!rf_ntsc_buffered_boundary(d,expected,parity,nominal,&start)) {
+        if (pending) rf_reject_field(d,RF_REJECT_CADENCE,"unconfirmed composite vertical candidate");
+        return;
+    }
+    if (rf_render_field(d,d->field_start,d->field_parity,(uint64_t)llround(start*4),callback,context)) {
+        d->field_start=start;
+        d->field_parity=parity;
+        d->status.vsync_count++;
+    }
 }
 
 static void rf_vertical_start(gui_rf_decoder_t *d, double first_eq,
@@ -1982,6 +2058,21 @@ static void rf_vertical_start(gui_rf_decoder_t *d, double first_eq,
         }
         double field_lines=(start-d->field_start)/cadence_period;
         double expected=d->format==GUI_RF_PAL ? 312.5 : 262.5;
+        if (d->cvbs_mode && d->format==GUI_RF_NTSC &&
+            fabs(field_lines-expected)<cadence_tolerance &&
+            fabs(d->last_level_field-d->field_start)<nominal) {
+            /* A widened first EQ can move the apparent origin half a line
+             * late or repeat the previous parity. The measured first broad
+             * must independently agree with the next interlaced grid. */
+            int next=1-d->field_parity;
+            double predicted=d->field_start+(next==1 ? 263 : 262)*nominal;
+            double from_broad=d->first_v-(next==0 ? 4.0 : 3.5)*nominal;
+            if (fabs(from_broad-predicted)<.25*nominal) {
+                if (parity!=next) return; /* Confirm from the complete buffered train. */
+                if (d->eq_run==5 && fabs(start-from_broad-.5*nominal)<.12*nominal)
+                    start=from_broad;
+            }
+        }
         if (fabs(field_lines-expected)<cadence_tolerance && parity!=d->field_parity) {
             rf_render_field(d,d->field_start,d->field_parity,
                             (uint64_t)llround(start*4.0),callback,context);
@@ -2172,7 +2263,7 @@ static void rf_commit_pulse_mode(gui_rf_decoder_t *d, double start, double end,
             d->v_run=1; d->first_v=start;
         } else d->v_run=0;
         if (d->v_run==3) rf_vertical_start(d,d->first_eq,callback,context);
-        else if (d->candidate_v_run==3 && d->v_run==0)
+        else if (d->candidate_v_run==3 && d->v_run==0 && !rf_cvbs_reconcile_candidate(d,start))
             rf_reject_field(d,RF_REJECT_CADENCE,"vertical broad pulses lack EQ cadence");
     } else { d->eq_run=0; d->v_run=0; }
     d->last_kind=kind; d->last_pulse=start;d->last_pulse_end=end;
@@ -2606,28 +2697,47 @@ static inline void rf_process_sync(gui_rf_decoder_t *d, uint64_t pos,
 static void rf_process_laserdisc(gui_rf_decoder_t *d, const float *samples, size_t count,
                                  uint64_t first_sample, gui_rf_frame_callback_t callback,
                                  void *context) {
-    float luma[256],chroma_i[256],chroma_q[256];
+    float luma[256],chroma_i[256],chroma_q[256],sync[256];
     const size_t block_size=GUI_LD_RF_DECIMATION*(sizeof(luma)/sizeof(luma[0]));
     for (size_t offset=0; offset<count; offset+=block_size) {
         size_t block=count-offset;
         if (block>block_size) block=block_size;
         uint64_t first=first_sample+offset;
+        if (d->cvbs_mode==1 && d->format==GUI_RF_NTSC) {
+            /* Try the other slicer only after measured H without a field for
+             * ~100 ms. Keep the selected slicer while it delivers fields. */
+            uint64_t now=first/GUI_LD_RF_DECIMATION;
+            if (!d->cvbs_sync_retry) d->cvbs_sync_retry=now+RF_VIDEO_RATE/10;
+            if (now>=d->cvbs_sync_retry && (d->status.h_locked || d->cvbs.sync_restore)) {
+                if (!d->status.fields_decoded || (now>=d->last_level_field &&
+                    now-d->last_level_field>=RF_VIDEO_RATE/10)) {
+                    d->cvbs.sync_restore=!d->cvbs.sync_restore;
+                    d->cvbs.integral=0;
+                    d->cvbs.sync.length=0;
+                    rf_reacquire_sync(d);
+                }
+                d->cvbs_sync_retry=now+RF_VIDEO_RATE/10;
+            }
+        }
         size_t produced=d->cvbs_mode ? cvbs_frontend_process(&d->cvbs,samples+offset,block,first,
-            luma,chroma_i,chroma_q) : gui_ld_rf_demod_process(&d->ld_demod,samples+offset,block,first,
+            luma,chroma_i,chroma_q,sync) : gui_ld_rf_demod_process(&d->ld_demod,samples+offset,block,first,
             luma,chroma_i,chroma_q,sizeof(luma)/sizeof(luma[0]));
         uint64_t pos=first/GUI_LD_RF_DECIMATION+(first%GUI_LD_RF_DECIMATION!=0u);
         for (size_t n=0; n<produced; ++n,++pos) {
             unsigned at=(unsigned)(pos&RF_RING_MASK);
-            d->sync_y=d->sync_alpha*d->sync_y+(1.0f-d->sync_alpha)*luma[n];
+            float timing=d->cvbs_mode ? sync[n] : luma[n];
+            d->sync_y=d->sync_alpha*d->sync_y+(1.0f-d->sync_alpha)*timing;
             d->luma[at]=luma[n];
             d->sync[at]=d->sync_y;
-            d->sync_luma[at]=luma[n];
+            d->sync_luma[at]=timing;
             /* Composite U*sin + V*cos yields V-iU under e^-i(wt).
              * Rotate into the common renderer's U+iV basis. */
             d->ci[at]=-chroma_q[n];
             d->cq[at]=chroma_i[n];
             rf_process_sync(d,pos,callback,context);
         }
+        if (d->cvbs_mode && d->format==GUI_RF_NTSC && produced)
+            rf_cvbs_check_vertical(d,pos-1,callback,context);
     }
 }
 
