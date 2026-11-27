@@ -28,6 +28,7 @@ gui_vhs_hifi_decoder_t *gui_vhs_hifi_create_iq(gui_rf_format_t format, uint32_t 
                                              uint64_t center_hz);
 bool gui_vhs_hifi_set_parallel(gui_vhs_hifi_decoder_t *decoder, gui_rf_parallel_fn run, void *pool);
 void gui_vhs_hifi_destroy(gui_vhs_hifi_decoder_t *decoder);
+bool gui_vhs_hifi_locked(const gui_vhs_hifi_decoder_t *decoder);
 void gui_vhs_hifi_reset(gui_vhs_hifi_decoder_t *decoder);
 
 /* PAL/NTSC VHS Hi-Fi RF to borrowed 48 kHz interleaved stereo.
