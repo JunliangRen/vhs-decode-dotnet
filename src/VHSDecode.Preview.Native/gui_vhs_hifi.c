@@ -272,6 +272,10 @@ bool gui_vhs_hifi_set_parallel(gui_vhs_hifi_decoder_t *d,gui_rf_parallel_fn run,
     return true;
 }
 
+bool gui_vhs_hifi_locked(const gui_vhs_hifi_decoder_t *decoder) {
+    return decoder && decoder->stream.status.locked;
+}
+
 void gui_vhs_hifi_reset(gui_vhs_hifi_decoder_t *decoder) {
     if (!decoder) return;
     uint64_t resets = decoder->stream.status.resets + 1;

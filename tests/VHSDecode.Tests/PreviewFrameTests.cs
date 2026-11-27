@@ -232,6 +232,8 @@ public sealed class PreviewFrameTests
             scoped.Process(samples, rate, TestContext.Current.CancellationToken);
             Assert.Equal(saved, first.SignalYuv.ToArray());
         }
+        Assert.True(decoder.LockStatus.VerticalLocked);
+        Assert.Null(decoder.LockStatus.AudioLocked);
         var initial = fields.ToArray();
         fields.Clear();
         decoder.Process(samples, rate, TestContext.Current.CancellationToken);
@@ -245,6 +247,27 @@ public sealed class PreviewFrameTests
     }
 
     [Fact]
+    public void HorizontalOnlyInputExpiresFieldLock()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+            == System.Runtime.InteropServices.Architecture.X64 && File.Exists(Path.Combine(AppContext.BaseDirectory,
+            "vhsdecode_realtime_preview.dll")), "The Windows x64 Realtime preview library was not staged.");
+        var options = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs, PreviewVideoStandard.Pal, 20_000_000);
+        using var session = new RealtimePreviewSession(options, _ => { });
+        var samples = CvbsTestSignal.Create(true);
+        session.Process(samples, 0, TestContext.Current.CancellationToken);
+        Assert.True(session.LockStatus.VerticalLocked);
+        short[] line = samples.AsSpan(20 * 1280, 1280).ToArray();
+        short[] horizontal = new short[1280 * 1000];
+        for (int i = 0; i < horizontal.Length; i += line.Length)
+            line.CopyTo(horizontal, i);
+        session.Process(horizontal, samples.Length, TestContext.Current.CancellationToken);
+        Assert.Equal(new PreviewLockStatus(true, false, false, null), session.LockStatus);
+        session.Reset();
+        Assert.Equal(new PreviewLockStatus(false, false, false, null), session.LockStatus);
+    }
+
+    [Fact]
     public void RealtimeRejectsUnsupportedSettingsBeforeOpeningInput()
     {
         var options = new PreviewFieldOptions("missing.s16", PreviewSourceFormat.Vhs,
@@ -255,7 +278,7 @@ public sealed class PreviewFrameTests
         Action<PreviewField> sink = _ => throw new InvalidOperationException("Unexpected field");
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         Assert.Throws<NotSupportedException>(() =>
-            PreviewFileDecoder.DecodeFields(options with { SourceFormat = PreviewSourceFormat.LaserDisc, Standard = PreviewVideoStandard.Pal }, sink, cancellationToken));
+            PreviewFileDecoder.DecodeFields(options with { SourceFormat = PreviewSourceFormat.LaserDisc, Standard = PreviewVideoStandard.Secam }, sink, cancellationToken));
         Assert.Throws<NotSupportedException>(() =>
             PreviewFileDecoder.DecodeFields(options with { InputSampleRateHz = 10_000_000 }, sink, cancellationToken));
         Assert.Throws<NotSupportedException>(() =>

@@ -9,6 +9,10 @@ public enum PreviewVideoStandard { Ntsc, Pal, Secam }
 public enum PreviewAudioTrack { None, VhsHiFi, BetamaxHiFi, LaserDiscAnalog, LaserDiscDigitalPcm, LaserDiscDts, LaserDiscAc3Rf }
 public enum BetamaxVideoProfile { Standard, HiFi, SuperBeta, SuperBetaHiFi, EdBeta }
 
+/// <summary>Receiver state at the end of a processed block. Null means the stream has no such track.</summary>
+public readonly record struct PreviewLockStatus(bool? HorizontalLocked, bool? VerticalLocked,
+    bool? ColorLocked, bool? AudioLocked);
+
 public sealed record RealtimePreviewOptions(
     PreviewSourceFormat SourceFormat,
     PreviewVideoStandard Standard,
@@ -65,6 +69,20 @@ public sealed class RealtimePreviewSession : IDisposable
     private readonly NativeDecoder _decoder;
     private readonly CallbackState _state;
     private int _busy;
+    private int _lockFlags;
+
+    /// <summary>Thread-safe snapshot after the latest completed RF block. Reset and Finish clear lock.</summary>
+    public PreviewLockStatus LockStatus
+    {
+        get
+        {
+            int flags = Volatile.Read(ref _lockFlags);
+            bool video = _state.Options.AudioTrack != PreviewAudioTrack.VhsHiFi;
+            bool audio = _state.Options.AudioTrack != PreviewAudioTrack.None;
+            return new(video ? (flags & 1) != 0 : null, video ? (flags & 2) != 0 : null,
+                video ? (flags & 4) != 0 : null, audio ? (flags & 8) != 0 : null);
+        }
+    }
 
     public RealtimePreviewSession(RealtimePreviewOptions options, Action<PreviewField>? fieldSink = null,
         Action<PreviewAudioBlock>? audioSink = null)
@@ -117,6 +135,7 @@ public sealed class RealtimePreviewSession : IDisposable
                                 FieldCallback, AudioCallback, callbackContext) != 1)
                             throw new InvalidOperationException("The Realtime preview decoder rejected the RF block.");
                     }
+                    Volatile.Write(ref _lockFlags, NativeLockFlags(_decoder));
                     _state.Error?.Throw();
                     samples = samples[count..];
                     firstSourceSample += count;
@@ -145,6 +164,7 @@ public sealed class RealtimePreviewSession : IDisposable
             try
             {
                 NativeFinish(_decoder, AudioCallback, GCHandle.ToIntPtr(context));
+                Volatile.Write(ref _lockFlags, 0);
                 _state.Error?.Throw();
             }
             finally
@@ -160,7 +180,11 @@ public sealed class RealtimePreviewSession : IDisposable
     public void Reset()
     {
         Enter();
-        try { NativeReset(_decoder); }
+        try
+        {
+            NativeReset(_decoder);
+            Volatile.Write(ref _lockFlags, 0);
+        }
         finally { Exit(); }
     }
 
@@ -209,6 +233,7 @@ public sealed class RealtimePreviewSession : IDisposable
                 throw new NotSupportedException("LaserDisc DTS requires a native preview built with FFmpeg DCA support (-FfmpegPrefix).");
             int source = options.SourceFormat switch
             {
+                PreviewSourceFormat.LaserDisc when options.Standard == PreviewVideoStandard.Pal => 10,
                 PreviewSourceFormat.LaserDisc => 3,
                 PreviewSourceFormat.SVhs => 4,
                 PreviewSourceFormat.SecamVhs => 7,
@@ -241,6 +266,12 @@ public sealed class RealtimePreviewSession : IDisposable
                 throw new InvalidOperationException("Could not initialize the Realtime preview decoder.");
             if (options.IncludeSignalScopes && NativeEnableScope(decoder) != 1)
                 throw new InvalidOperationException("Could not allocate the signal scope buffer.");
+            // Check the lock API before the first block can invoke a host callback.
+            try { _ = NativeLockFlags(decoder); }
+            catch (EntryPointNotFoundException ex)
+            {
+                throw new NotSupportedException("The native Realtime preview library does not support receiver lock status.", ex);
+            }
             return decoder;
         }
         catch
@@ -365,6 +396,9 @@ public sealed class RealtimePreviewSession : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void NativeAudioCallback(nint context, nint samples, nuint frames, ulong end, int locked);
+
+    [DllImport(LibraryName, EntryPoint = "realtime_lock_flags", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int NativeLockFlags(NativeDecoder decoder);
 
     [DllImport(LibraryName, EntryPoint = "realtime_has_dts", CallingConvention = CallingConvention.Cdecl)]
     private static extern int NativeHasDts();

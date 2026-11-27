@@ -47,7 +47,11 @@ public static class RealtimePreviewCapabilities
                 foreach (var source in new[] { PreviewSourceFormat.Vhs, PreviewSourceFormat.SVhs,
                     PreviewSourceFormat.Cvbs, PreviewSourceFormat.Betamax })
                     yield return new(source, standard, rate, normal, silent);
-                if (standard != PreviewVideoStandard.Ntsc) continue;
+                if (standard == PreviewVideoStandard.Pal)
+                {
+                    yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, silent);
+                    continue;
+                }
                 foreach (var profile in new[] { normal, BetamaxVideoProfile.HiFi,
                     BetamaxVideoProfile.SuperBeta, BetamaxVideoProfile.SuperBetaHiFi, BetamaxVideoProfile.EdBeta })
                 {

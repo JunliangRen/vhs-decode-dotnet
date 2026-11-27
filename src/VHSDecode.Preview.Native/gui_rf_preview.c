@@ -3261,6 +3261,7 @@ static preview_handle *preview_open(int source, int pal, int full, uint32_t inpu
     }
 
     gui_rf_profile_t profile = cvbs_mode ? (pal ? GUI_RF_PROFILE_PAL_LASERDISC : GUI_RF_PROFILE_NTSC_LASERDISC)
+        : source == 10 ? GUI_RF_PROFILE_PAL_LASERDISC
         : source == 9 ? GUI_RF_PROFILE_NTSC_ED_BETA
         : source == 8 ? GUI_RF_PROFILE_MESECAM_VHS
         : source == 7 ? GUI_RF_PROFILE_SECAM_VHS
@@ -3306,7 +3307,7 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
 /* A new entry point prevents an older DLL from interpreting an extended source as VHS. */
 __declspec(dllexport) preview_handle *realtime_open_v9(int source, int pal, int full,
                                                      uint32_t rate, int audio_track) {
-    if (source < 0 || source > 9) return NULL;
+    if (source < 0 || source > 10 || (source == 10 && (!pal || audio_track != 0))) return NULL;
     return preview_open(source,pal,full,rate,audio_track,0);
 }
 
@@ -3409,6 +3410,29 @@ __declspec(dllexport) void realtime_close(preview_handle *handle) {
     if (handle->audio) gui_vhs_hifi_destroy(handle->audio);
     gui_rf_resampler_destroy(handle->resampler);
     free(handle);
+}
+
+/* Read only at a block boundary after all DSP workers have joined. */
+__declspec(dllexport) int realtime_lock_flags(const preview_handle *handle) {
+    int flags = 0;
+    if (handle->core) {
+        const gui_rf_decode_status_t *s = &handle->core->status;
+        /* H-only input can continue indefinitely without a new vertical pulse. */
+        uint64_t now = handle->core->next_raw / handle->core->raw_decimation;
+        uint64_t last = handle->core->last_level_field;
+        double field_lines = handle->core->format == GUI_RF_PAL ? 312.5 : 262.5;
+        bool vertical = s->v_locked && now >= last &&
+            (double)(now - last) <= 2.0 * field_lines * handle->core->period;
+        flags = (s->h_locked ? 1 : 0) | (vertical ? 2 : 0) | (vertical && s->color_locked ? 4 : 0);
+    }
+    bool audio = gui_vhs_hifi_locked(handle->audio) || gui_ld_rf_analog_locked(handle->ld_audio)
+        || gui_ld_rf_digital_locked(handle->ld_digital) || gui_ld_rf_ac3_locked(handle->ld_ac3);
+    if (handle->beta_audio) {
+        gui_beta_hifi_status_t status;
+        gui_beta_hifi_get_status(handle->beta_audio, &status);
+        audio = status.locked;
+    }
+    return flags | (audio ? 8 : 0);
 }
 
 __declspec(dllexport) void realtime_reset(preview_handle *handle) {

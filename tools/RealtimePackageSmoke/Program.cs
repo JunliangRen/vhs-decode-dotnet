@@ -14,6 +14,16 @@ foreach (int threads in new[] { 4, 8 })
     if (audioFrames != 480)
         throw new InvalidDataException($"Expected 480 stereo frames, received {audioFrames}.");
 }
+var palLd = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Pal, 40_000_000);
+if (!RealtimePreviewCapabilities.IsSupported(palLd)
+    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog }))
+    throw new InvalidDataException("Unexpected PAL LD capabilities.");
+using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDataException("Field on silence")))
+{
+    session.Process(new short[65_536], 0);
+    if (session.LockStatus != new PreviewLockStatus(false, false, false, null))
+        throw new InvalidDataException("PAL LD unexpectedly locked on silence.");
+}
 var ld = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Ntsc, 40_000_000)
 {
     AudioTrack = PreviewAudioTrack.LaserDiscDts

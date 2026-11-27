@@ -57,3 +57,11 @@ values per output pixel in Y, U, V order. Y is measured before the monitor
 transfer function at 64 counts per IRE. U and V use 4096 counts per normalized
 unit before RGB clipping. The field dimensions and crop match BGRA. The
 default skips scope buffer allocation and returns an empty plane.
+
+PAL LaserDisc video accepts 20 or 40 MSPS RF. Select `LaserDisc`, `Pal` and
+`AudioTrack.None` and supply only a field sink. A session exposes
+`LockStatus` for polling on a display thread. Its horizontal sync, vertical
+sync, color and selected audio indicators describe the last completed RF
+block, so a callback during processing can still see the previous snapshot.
+Absent tracks report null. A reset or finish clears active locks. Audio lock
+follows the selected decoder and can include single-channel analog reception.
