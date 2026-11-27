@@ -1870,23 +1870,57 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
     return true;
 }
 
+/* Locate a damaged NTSC vertical interval in the buffered sync plane. Only
+ * search the phase bracketed by two accepted V references. Require actual
+ * narrow pre-equalizers and serrated broad pulses on the same half-line grid. */
+static bool rf_ntsc_buffered_boundary(const gui_rf_decoder_t *d, double expected,
+                                      int parity, double period, double *boundary) {
+    double threshold=(d->sync_est+d->blank_est)*.5;
+    double first_broad=expected+(parity==0 ? 4.0 : 3.5)*period;
+    for (int slot=0; slot<6; ++slot) {
+        double center=first_broad+slot*.5*period;
+        for (uint64_t t=(uint64_t)(center-.30*period); t<=(uint64_t)(center+.30*period); ++t) {
+            if (d->sync[(t-1)&RF_RING_MASK]<threshold || d->sync[t&RF_RING_MASK]>=threshold) continue;
+            double origin=(double)t-slot*.5*period;
+            int broad=0, narrow=0;
+            /* At 5 MHz the probes are 1.6, 4, 11.2, 20 and 29.8 us
+             * into each half-line. EQ must already be high at 4 us;
+             * a broad must span both interior probes and end before the next slot. */
+            for (int j=-6; j<6; ++j) {
+                uint64_t at=(uint64_t)llround(origin+j*.5*period);
+                if (d->sync[(at+8)&RF_RING_MASK]>=threshold ||
+                    d->sync[(at+149)&RF_RING_MASK]<threshold) continue;
+                bool middle=d->sync[(at+56)&RF_RING_MASK]<threshold;
+                bool late=d->sync[(at+100)&RF_RING_MASK]<threshold;
+                if (j<0 && d->sync[(at+20)&RF_RING_MASK]>=threshold && !middle && !late) narrow++;
+                if (j>=0 && middle && late) broad++;
+            }
+            if (broad>=3 && narrow>=3) {
+                *boundary=origin-(parity==0 ? 4.0 : 3.5)*period;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void rf_vertical_start(gui_rf_decoder_t *d, double first_eq,
                               gui_rf_frame_callback_t callback, void *context) {
     double nominal=d->p.line_us*5.0;
     bool recovered_first_eq=false;
-    if(d->format==GUI_RF_PAL && d->p.eq_count==5 && d->eq_run==d->p.eq_count-1 &&
-        d->last_h_width>=3.5 && d->last_h_width<=3.8 &&
+    bool pal_five_eq=d->format==GUI_RF_PAL && d->p.eq_count==5;
+    bool ntsc_vhs_six_eq=d->profile==GUI_RF_PROFILE_NTSC_VHS && d->p.eq_count==6;
+    if((pal_five_eq || ntsc_vhs_six_eq) && d->eq_run==d->p.eq_count-1 &&
+        d->last_h_width>=3.5 && d->last_h_width<=(ntsc_vhs_six_eq ? 3.85 : 3.8) &&
         d->previous_h>0.0 && d->previous_h_width>=3.8 &&
         fabs(first_eq-d->last_h-.5*d->period)<.08*d->period &&
         fabs(d->first_v-d->last_h-.5*d->p.eq_count*d->period)<.10*d->period) {
         /* A band-limited first equalizer can straddle the 3.5us H/EQ
-         * threshold. Four following measured half-line equalizers and
-         * three measured broad pulses place it in the missing fifth slot.
+         * threshold. The remaining four (PAL) or five (NTSC VHS) equalizers and
+         * three measured broad pulses identify the start of the train.
          * Reclassify only that borderline pulse, then retain the earlier
          * clear H for parity: using the equalizer itself would falsely
-         * force integer phase if the half-line field is also broadened.
-         * This is PAL-family luminance timing, independent of the selected
-         * chroma decoder: a wrong colour system must still show stable Y.
+         * force half-line phase regardless of the real preceding H grid.
          * No global pulse-width threshold or field cadence is relaxed. */
         first_eq=d->last_h;recovered_first_eq=true;
         d->last_h=d->previous_h;d->last_h_width=d->previous_h_width;
@@ -1903,6 +1937,22 @@ static void rf_vertical_start(gui_rf_decoder_t *d, double first_eq,
          * pulse above. Do not invent its phase from the expected cadence. */
         rf_reject_field(d,RF_REJECT_PARITY,"MESECAM vertical EQ train incomplete");
         return;
+    }
+    /* A missing or extra leading EQ shifts the apparent start by half a
+     * line. A measured first broad supplies the other end of the train.
+     * Correct only a repeated parity in an already established field pair. */
+    if (ntsc_vhs_six_eq && !recovered_first_eq && d->have_field && d->status.v_locked &&
+        (d->eq_run==5 || d->eq_run==7) && d->last_h>0.0) {
+        double corrected=d->first_v-3.0*d->period;
+        int next=1-d->field_parity;
+        double phase=next ? .5 : 0.0;
+        double grid=(corrected-d->last_h)/d->period-phase;
+        double start=corrected-(next ? .5 : 1.0)*d->period;
+        double lines=d->field_parity==0 ? 263.0 : 262.0;
+        if (fabs(corrected-first_eq-(d->eq_run-6)*.5*d->period)<.08*d->period &&
+            corrected>d->last_h && fabs(grid-round(grid))<.12 &&
+            fabs(start-d->field_start-lines*nominal)<.25*nominal)
+            first_eq=corrected;
     }
     if (d->last_h<=0.0 || first_eq-d->last_h>nominal*2.1) {
         rf_reject_field(d,RF_REJECT_PARITY,"vertical EQ lacks recent H reference");
@@ -1951,6 +2001,23 @@ static void rf_vertical_start(gui_rf_decoder_t *d, double first_eq,
                 (uint64_t)llround(midpoint*4.0),callback,context);
             rf_render_field(d,midpoint,1-d->field_parity,
                 (uint64_t)llround(start*4.0),callback,context);
+        } else if (ntsc_vhs_six_eq && parity!=d->field_parity &&
+                   fabs(field_lines-3*expected)<2.0 && d->status.h_locked &&
+                   fabs((double)d->last_level_field-d->field_start)<nominal) {
+            /* Two missing V references. Both intermediate vertical patterns
+             * must still exist in RF before any callback can be emitted. */
+            double first,second;
+            int lines=d->field_parity==0 ? 263 : 262;
+            double period=(start-d->field_start)/(525+lines);
+            if (rf_ntsc_buffered_boundary(d,d->field_start+lines*period,parity,period,&first) &&
+                rf_ntsc_buffered_boundary(d,d->field_start+525*period,d->field_parity,period,&second)) {
+                rf_render_field(d,d->field_start,d->field_parity,(uint64_t)llround(first*4),callback,context);
+                rf_render_field(d,first,parity,(uint64_t)llround(second*4),callback,context);
+                rf_render_field(d,second,d->field_parity,(uint64_t)llround(start*4),callback,context);
+            } else {
+                d->ready_fields=0;
+                rf_reject_field(d,RF_REJECT_CADENCE,"missing buffered vertical pulse evidence");
+            }
         } else {
             d->ready_fields=0;
             if (fabs(field_lines-expected)>=cadence_tolerance)
