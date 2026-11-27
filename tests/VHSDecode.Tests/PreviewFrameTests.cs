@@ -136,6 +136,55 @@ public sealed class PreviewFrameTests
         Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(audioOptions, _ => { }, _ => { }));
     }
 
+    [Fact]
+    public void RealtimeScopeAndTapeOptionsFollowTheFieldFormat()
+    {
+        foreach (var source in new[] { PreviewSourceFormat.SecamVhs, PreviewSourceFormat.MesecamVhs })
+        {
+            var options = new RealtimePreviewOptions(source, PreviewVideoStandard.Secam, 20_000_000)
+                { IncludeSignalScopes = true };
+            Assert.True(RealtimePreviewCapabilities.IsSupported(options));
+            Assert.True(RealtimePreviewCapabilities.IsSupported(options with { Standard = PreviewVideoStandard.Pal }));
+            Assert.False(RealtimePreviewCapabilities.IsSupported(options with { Standard = PreviewVideoStandard.Ntsc }));
+        }
+        var audio = new RealtimePreviewOptions(PreviewSourceFormat.Vhs, PreviewVideoStandard.Pal, 40_000_000)
+            { AudioTrack = PreviewAudioTrack.VhsHiFi, IncludeSignalScopes = true };
+        Assert.False(RealtimePreviewCapabilities.IsSupported(audio));
+        var ed = new RealtimePreviewOptions(PreviewSourceFormat.Betamax, PreviewVideoStandard.Ntsc, 40_000_000)
+            { BetamaxProfile = BetamaxVideoProfile.EdBeta, AudioTrack = PreviewAudioTrack.BetamaxHiFi };
+        Assert.True(RealtimePreviewCapabilities.IsSupported(ed));
+        Assert.False(RealtimePreviewCapabilities.IsSupported(ed with { Standard = PreviewVideoStandard.Pal }));
+    }
+
+    [Fact]
+    public void RealtimeCapabilitiesMatchSessionAndFileValidation()
+    {
+        var combinations = RealtimePreviewCapabilities.SupportedCombinations;
+        Assert.Equal(combinations.Count, combinations.Distinct().Count());
+        foreach (var c in combinations)
+        {
+            var options = new RealtimePreviewOptions(c.SourceFormat, c.Standard, c.InputSampleRateHz)
+                { BetamaxProfile = c.BetamaxProfile, AudioTrack = c.AudioTrack, Cvbs50Ohms = c.SupportsCvbs50Ohms };
+            Assert.True(RealtimePreviewCapabilities.IsSupported(options));
+            RealtimePreviewSession.Validate(options);
+        }
+
+        foreach (var profile in new[] { BetamaxVideoProfile.SuperBeta, BetamaxVideoProfile.SuperBetaHiFi })
+        {
+            var options = new RealtimePreviewOptions(PreviewSourceFormat.Betamax, PreviewVideoStandard.Ntsc, 40_000_000)
+                { BetamaxProfile = profile };
+            Assert.True(RealtimePreviewCapabilities.IsSupported(options));
+            Assert.Equal(profile == BetamaxVideoProfile.SuperBetaHiFi,
+                RealtimePreviewCapabilities.IsSupported(options with { AudioTrack = PreviewAudioTrack.BetamaxHiFi }));
+            var invalid = options with { Standard = PreviewVideoStandard.Pal };
+            Assert.False(RealtimePreviewCapabilities.IsSupported(invalid));
+            Assert.Throws<NotSupportedException>(() => RealtimePreviewSession.Validate(invalid));
+            var file = new PreviewFieldOptions("missing.s16", invalid.SourceFormat, invalid.Standard)
+                { DecodeMode = PreviewDecodeMode.Realtime, BetamaxProfile = profile };
+            Assert.Throws<NotSupportedException>(() => PreviewFileDecoder.DecodeFields(file, _ => { }, TestContext.Current.CancellationToken));
+        }
+    }
+
     [Theory]
     [InlineData(PreviewSourceFormat.Vhs)]
     [InlineData(PreviewSourceFormat.Betamax)]
@@ -165,9 +214,24 @@ public sealed class PreviewFrameTests
         var options = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs,
             pal ? PreviewVideoStandard.Pal : PreviewVideoStandard.Ntsc, rate);
         var fields = new List<(TimeSpan Time, bool Top)>();
-        using var decoder = new RealtimePreviewSession(options, f => fields.Add((f.Timestamp, f.IsTopField)));
+        using var decoder = new RealtimePreviewSession(options, f =>
+        {
+            Assert.True(f.SignalYuv.IsEmpty);
+            fields.Add((f.Timestamp, f.IsTopField));
+        });
         decoder.Process(samples, 0, TestContext.Current.CancellationToken);
         Assert.True(fields.Count >= 4);
+        PreviewField? first = null;
+        using (var scoped = new RealtimePreviewSession(options with { IncludeSignalScopes = true }, f => first ??= f))
+        {
+            scoped.Process(samples, 0, TestContext.Current.CancellationToken);
+            Assert.NotNull(first);
+            Assert.Equal(first.Width * first.Height * 3, first.SignalYuv.Length);
+            Assert.True(first.SignalYuv.Span.ContainsAnyExcept((short)0));
+            var saved = first.SignalYuv.ToArray();
+            scoped.Process(samples, rate, TestContext.Current.CancellationToken);
+            Assert.Equal(saved, first.SignalYuv.ToArray());
+        }
         var initial = fields.ToArray();
         fields.Clear();
         decoder.Process(samples, rate, TestContext.Current.CancellationToken);
@@ -207,6 +271,8 @@ public sealed class PreviewFrameTests
     [InlineData(PreviewVideoStandard.Pal, 4, 8_000_000)]
     [InlineData(PreviewVideoStandard.Pal, 4, 10_000_000)]
     [InlineData(PreviewVideoStandard.Ntsc, 4, 20_000_000)]
+    [InlineData(PreviewVideoStandard.Ntsc, 4, 40_000_000)]
+    [InlineData(PreviewVideoStandard.Pal, 1, 40_000_000)]
     public void RealtimeVhsHiFiKeepsPcmAndSourceClockAcrossCalls(PreviewVideoStandard standard, int threads, int rate)
     {
         Assert.SkipUnless(OperatingSystem.IsWindows()
@@ -219,7 +285,7 @@ public sealed class PreviewFrameTests
         {
             AudioTrack = PreviewAudioTrack.VhsHiFi
         };
-        var rf = new short[200_113];
+        var rf = new short[rate / 50 + 113];
         var random = new Random(7);
         for (int i = 0; i < rf.Length; i++)
             rf[i] = (short)random.Next(-500, 500);
@@ -244,7 +310,7 @@ public sealed class PreviewFrameTests
         Assert.Equal(expected, chopped.SelectMany(block => block.InterleavedSamples.ToArray()));
 
         chopped.Clear();
-        const long jump = 900_001;
+        long jump = rate == 40_000_000 ? 900_002 : 900_001;
         session.Process(rf, jump, token);
         Assert.Equal(whole[^1].EndSourceSample + jump, chopped[^1].EndSourceSample);
         Assert.Equal(expected, chopped.SelectMany(block => block.InterleavedSamples.ToArray()));

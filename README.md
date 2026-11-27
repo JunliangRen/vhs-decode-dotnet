@@ -120,8 +120,8 @@ Embedded TBC preview defaults to Exact and can explicitly use IPP-fast.
 
 Set `PreviewFieldOptions.DecodeMode` to `PreviewDecodeMode.Realtime` for the
 reduced-bandwidth file preview. On Windows x64 it accepts PAL/NTSC baseband CVBS, PAL/NTSC VHS,
-PAL/NTSC Betamax or NTSC LaserDisc at 20 or 40 MSPS from signed 16-bit RF or FLAC (FFmpeg required
-for FLAC). It returns owned, interlaced BGRA fields. Use `DecodeThreads` on either
+PAL/NTSC S-VHS and Betamax, SECAM/MESECAM VHS, or NTSC LaserDisc at 20 or 40 MSPS from signed 16-bit RF or FLAC (FFmpeg required
+for FLAC). NTSC Betamax includes SuperBeta and ED Beta. It returns owned, interlaced BGRA fields with optional signal-domain Y/U/V samples. Use `DecodeThreads` on either
 `RealtimePreviewOptions` or `PreviewFieldOptions` to set the session's total
 decode thread budget (1–64, including the caller; default 1). For example,
 `new RealtimePreviewOptions(PreviewSourceFormat.Betamax, PreviewVideoStandard.Pal, 40_000_000) { DecodeThreads = 4 }`.
@@ -138,7 +138,7 @@ for the matching video carriers. The profile selects video processing.
 Use `RealtimePreviewSession` to submit mono signed 16-bit RF from memory.
 Pass a field callback for video, or select `PreviewAudioTrack.VhsHiFi` and
 pass only an audio callback for audio-only VHS HiFi. VHS HiFi supports both
-standards at 8, 8.192, 10, and 20 MSPS and returns owned 48 kHz float stereo
+standards at 8, 8.192, 10, 20 and 40 MSPS and returns owned 48 kHz float stereo
 with the ending RF sample position and lock status. Call `Process` serially
 on a worker thread with each block's absolute source sample position. An RF
 discontinuity or explicit `Reset` discards decoder history. Callbacks run on

@@ -32,3 +32,28 @@ using var composite = new RealtimePreviewSession(cvbs, OnField);
 `Cvbs50Ohms` defaults to false. Expose the option only for the CVBS source.
 It enables low-frequency restoration and back-porch clamping for AC-coupled
 DdD captures. The name follows the offline decoder preset.
+
+Use `PreviewSourceFormat.SVhs` for PAL or NTSC S-VHS video at 20 or 40 MSPS.
+For NTSC SuperBeta, select Betamax and `BetamaxVideoProfile.SuperBeta` or
+`SuperBetaHiFi`. The HiFi profile supports video alone or simultaneous stereo
+audio via `AudioTrack = PreviewAudioTrack.BetamaxHiFi`. For separate VHS
+Hi-Fi RF, use the VHS source and VHS HiFi track with only an audio sink.
+Both standards accept 8, 8.192, 10, 20 and 40 MSPS and output 48 kHz stereo.
+
+Enumerate `RealtimePreviewCapabilities.SupportedCombinations` to populate a
+source selector, or call `RealtimePreviewCapabilities.IsSupported(options)`
+for a single configuration. These describe format support in the packaged
+win-x64 decoder; querying them does not open a decoder or probe the host.
+
+For 625/50 native SECAM VHS or MESECAM VHS, select `SecamVhs` or `MesecamVhs`
+with `PreviewVideoStandard.Secam` at 20 or 40 MSPS. The explicit tape sources
+also accept `Pal` for compatibility with hosts using 625/50 timing. NTSC ED
+Beta uses the Betamax source and `BetamaxVideoProfile.EdBeta`, with optional
+simultaneous `BetamaxHiFi` audio.
+
+Set `IncludeSignalScopes` on the stream or Realtime file field options to
+receive an owned `PreviewField.SignalYuv` buffer, three signed 16-bit
+values per output pixel in Y, U, V order. Y is measured before the monitor
+transfer function at 64 counts per IRE. U and V use 4096 counts per normalized
+unit before RGB clipping. The field dimensions and crop match BGRA. The
+default skips scope buffer allocation and returns an empty plane.
