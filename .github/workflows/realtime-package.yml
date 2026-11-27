@@ -28,7 +28,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          if ($env:VERSION -notmatch '^2\.32\.0-preview\.ci\.[0-9]+$') { throw 'Unexpected package version' }
+          if ($env:VERSION -notmatch '^2\.33\.0-preview\.ci\.[0-9]+$') { throw 'Unexpected package version' }
           $root = Join-Path $env:RUNNER_TEMP 'consumer'
           New-Item -ItemType Directory $root | Out-Null
           Copy-Item tools/RegistryReleaseValidation/Host.csproj,tools/RegistryReleaseValidation/Program.cs,global.json $root
