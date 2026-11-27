@@ -60,7 +60,8 @@ default skips scope buffer allocation and returns an empty plane.
 
 PAL LaserDisc video accepts 20 or 40 MSPS RF. Select `LaserDisc`, `Pal` and
 `PreviewAudioTrack.LaserDiscAnalog` and supply field and audio sinks for concurrent
-interlaced video and 48 kHz stereo PCM. Use `PreviewAudioTrack.None` for video alone. A session exposes
+interlaced video and 48 kHz stereo PCM from the analog carriers. For discs with digital sound,
+select `PreviewAudioTrack.LaserDiscDigitalPcm` to receive 44.1 kHz stereo from EFM/CIRC. Use `PreviewAudioTrack.None` for video alone. A session exposes
 `LockStatus` for polling on a display thread. Its horizontal sync, vertical
 sync, color and selected audio indicators describe the last completed RF
 block, so a callback during processing can still see the previous snapshot.

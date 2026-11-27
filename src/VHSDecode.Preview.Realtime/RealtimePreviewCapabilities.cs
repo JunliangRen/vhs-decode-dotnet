@@ -51,6 +51,7 @@ public static class RealtimePreviewCapabilities
                 {
                     yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, silent);
                     yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, PreviewAudioTrack.LaserDiscAnalog);
+                    yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, PreviewAudioTrack.LaserDiscDigitalPcm);
                     continue;
                 }
                 foreach (var profile in new[] { normal, BetamaxVideoProfile.HiFi,

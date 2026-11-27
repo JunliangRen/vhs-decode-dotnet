@@ -156,7 +156,7 @@ and supply both sinks for video and 48 kHz interleaved analog L/R. Each
 carrier locks and mutes independently. The block lock flag means at least
 one channel is locked. Both timestamps use the input RF clock.
 
-For the NTSC LaserDisc digital track, use `PreviewAudioTrack.LaserDiscDigitalPcm`
+For the PAL or NTSC LaserDisc digital PCM track, use `PreviewAudioTrack.LaserDiscDigitalPcm`
 with both sinks. EFM clock recovery and CIRC decoding supply native 44,100 Hz
 interleaved float L/R. Read `PreviewAudioBlock.SampleRateHz` when opening
 the audio device. Digital audio carries RF-based media timestamps corrected

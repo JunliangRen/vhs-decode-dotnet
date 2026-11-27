@@ -17,7 +17,8 @@ foreach (int threads in new[] { 4, 8 })
 var palLd = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Pal, 40_000_000);
 if (!RealtimePreviewCapabilities.IsSupported(palLd)
     || !RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog })
-    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm }))
+    || !RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm })
+    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDts }))
     throw new InvalidDataException("Unexpected PAL LD capabilities.");
 using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDataException("Field on silence")))
 {

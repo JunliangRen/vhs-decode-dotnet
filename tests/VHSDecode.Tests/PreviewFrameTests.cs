@@ -397,7 +397,7 @@ public sealed class PreviewFrameTests
         Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(options, fieldSink: _ => { }));
         Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(options, audioSink: _ => { }));
         var pal = options with { Standard = PreviewVideoStandard.Pal };
-        if (track == PreviewAudioTrack.LaserDiscAnalog)
+        if (track is PreviewAudioTrack.LaserDiscAnalog or PreviewAudioTrack.LaserDiscDigitalPcm)
             Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(pal, fieldSink: _ => { }));
         else
             Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(pal));
@@ -409,14 +409,17 @@ public sealed class PreviewFrameTests
     [InlineData(20_000_000, PreviewAudioTrack.LaserDiscAc3Rf)]
     [InlineData(40_000_000, PreviewAudioTrack.LaserDiscDigitalPcm)]
     [InlineData(40_000_000, PreviewAudioTrack.LaserDiscAc3Rf)]
-    public void LaserDiscDigitalSilenceDoesNotFabricatePcmOnFinish(int rate, PreviewAudioTrack track)
+    [InlineData(20_000_000, PreviewAudioTrack.LaserDiscDigitalPcm, PreviewVideoStandard.Pal)]
+    [InlineData(40_000_000, PreviewAudioTrack.LaserDiscDigitalPcm, PreviewVideoStandard.Pal)]
+    public void LaserDiscDigitalSilenceDoesNotFabricatePcmOnFinish(int rate, PreviewAudioTrack track,
+        PreviewVideoStandard standard = PreviewVideoStandard.Ntsc)
     {
         Assert.SkipUnless(OperatingSystem.IsWindows()
             && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
                 == System.Runtime.InteropServices.Architecture.X64
             && File.Exists(Path.Combine(AppContext.BaseDirectory, "vhsdecode_realtime_preview.dll")),
             "The Windows x64 Realtime preview library was not staged.");
-        var options = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Ntsc, rate)
+        var options = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, standard, rate)
         {
             AudioTrack = track
         };
