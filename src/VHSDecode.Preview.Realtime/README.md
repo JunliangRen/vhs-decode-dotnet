@@ -59,7 +59,8 @@ unit before RGB clipping. The field dimensions and crop match BGRA. The
 default skips scope buffer allocation and returns an empty plane.
 
 PAL LaserDisc video accepts 20 or 40 MSPS RF. Select `LaserDisc`, `Pal` and
-`AudioTrack.None` and supply only a field sink. A session exposes
+`PreviewAudioTrack.LaserDiscAnalog` and supply field and audio sinks for concurrent
+interlaced video and 48 kHz stereo PCM. Use `PreviewAudioTrack.None` for video alone. A session exposes
 `LockStatus` for polling on a display thread. Its horizontal sync, vertical
 sync, color and selected audio indicators describe the last completed RF
 block, so a callback during processing can still see the previous snapshot.

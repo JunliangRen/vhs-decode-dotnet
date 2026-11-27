@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.31.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.31.0) (application version `2.31.0`).
+The current .NET port release is [`v0.4.0-2.32.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.32.0) (application version `2.32.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
@@ -150,7 +150,7 @@ This track selects the HiFi video carrier profile automatically. Schedule
 fields and 48 kHz stereo by their RF timestamps. Video acquisition and audio
 lock are independent, and the audio timeline continues through muted RF.
 
-For NTSC LaserDisc RF at 20 or 40 MSPS, select LaserDisc and NTSC. Use a
+For PAL or NTSC LaserDisc RF at 20 or 40 MSPS, select LaserDisc and the matching standard. Use a
 field sink alone for video, or select `PreviewAudioTrack.LaserDiscAnalog`
 and supply both sinks for video and 48 kHz interleaved analog L/R. Each
 carrier locks and mutes independently. The block lock flag means at least

@@ -16,13 +16,41 @@ foreach (int threads in new[] { 4, 8 })
 }
 var palLd = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Pal, 40_000_000);
 if (!RealtimePreviewCapabilities.IsSupported(palLd)
-    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog }))
+    || !RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog })
+    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm }))
     throw new InvalidDataException("Unexpected PAL LD capabilities.");
 using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDataException("Field on silence")))
 {
     session.Process(new short[65_536], 0);
     if (session.LockStatus != new PreviewLockStatus(false, false, false, null))
         throw new InvalidDataException("PAL LD unexpectedly locked on silence.");
+}
+// Exercise both PAL carriers after a reset, which must preserve the audio standard.
+var analog = palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog, InputSampleRateHz = 20_000_000 };
+var analogPcm = new List<float>();
+using (var session = new RealtimePreviewSession(analog, _ => { },
+    block => analogPcm.AddRange(block.InterleavedSamples.ToArray())))
+{
+    session.Reset();
+    var rf = new short[analog.InputSampleRateHz / 20];
+    for (int i = 0; i < rf.Length; i++)
+    {
+        double t = 2 * Math.PI * i / analog.InputSampleRateHz;
+        rf[i] = (short)(8000 * (Math.Sin(683593.75 * t + 20 * Math.Sin(1000 * t))
+                              + Math.Sin(1066406.25 * t + 10 * Math.Sin(2000 * t))));
+    }
+    session.Process(rf, 0);
+    if (session.LockStatus.AudioLocked != true || analogPcm.Count != 2 * 2400)
+        throw new InvalidDataException("Unexpected PAL LD audio lock or duration.");
+    // The last 20 ms contain 20 cycles on the left and 40 on the right.
+    int leftCycles = 0, rightCycles = 0;
+    for (int i = analogPcm.Count - 2 * 960; i < analogPcm.Count; i += 2)
+    {
+        if (analogPcm[i - 2] <= 0 && analogPcm[i] > 0) leftCycles++;
+        if (analogPcm[i - 1] <= 0 && analogPcm[i + 1] > 0) rightCycles++;
+    }
+    if (Math.Abs(leftCycles - 20) > 1 || Math.Abs(rightCycles - 40) > 1)
+        throw new InvalidDataException("PAL LD failed to decode both analog carriers after reset.");
 }
 var ld = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Ntsc, 40_000_000)
 {
