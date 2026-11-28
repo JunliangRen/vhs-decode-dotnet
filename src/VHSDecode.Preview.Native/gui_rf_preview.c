@@ -460,6 +460,26 @@ static double rf_nearest_h(const gui_rf_decoder_t *d, double target, double radi
     return result;
 }
 
+/* Use a local half-amplitude crossing for the display clock. The field
+ * detector uses a slower slice which can walk during vertical blanking.
+ * Measure on the picture-bandwidth sync plane before the sync low-pass. */
+static double rf_cvbs_display_edge(const gui_rf_decoder_t *d, double start) {
+    double delay=d->sync_delay-d->sync_luma_delay;
+    double edge=start-delay;
+    int64_t center=(int64_t)floor(edge);
+    if (center-6<(int64_t)d->low_first || center+10>(int64_t)d->low_last) return start;
+    double porch=(rf_read(d,d->sync_luma,edge-5)+rf_read(d,d->sync_luma,edge-3))*.5;
+    double tip=(rf_read(d,d->sync_luma,edge+6)+rf_read(d,d->sync_luma,edge+9))*.5;
+    if (porch-tip < .45*(d->blank_est-d->sync_est)) return start;
+    double level=(porch+tip)*.5;
+    for (int64_t i=center-3; i<=center+3; i++) {
+        float a=d->sync_luma[i & RF_RING_MASK], b=d->sync_luma[(i+1) & RF_RING_MASK];
+        if (a>=level && b<level)
+            return (double)i+(a-level)/(a-b)+delay;
+    }
+    return start;
+}
+
 static uint8_t rf_byte(double value) {
     /* Three calls per preview pixel: clamp then add-and-truncate instead of
      * a libm lrint per call (same result except on exact .5 values). */
@@ -1607,6 +1627,10 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
         rf_reject_field(d,RF_REJECT_LINE_MAP,"insufficient measured line sync");
         return false;
     }
+    if (d->cvbs_mode && d->format==GUI_RF_NTSC) {
+        for (int y=0;y<=rows;y++) if (anchors[y])
+            lines[y]=rf_cvbs_display_edge(d,lines[y]);
+    }
     /* Fill missing H pulses between real neighboring anchors. Never replace
      * every line's measured timing by a nominal constant line length. */
     for (int y=0; y<=rows; ++y) if (!anchors[y]) {
@@ -1615,6 +1639,12 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
         while (right<=rows && !anchors[right]) right++;
         if (left>=0 && right<=rows)
             lines[y]=lines[left]+(lines[right]-lines[left])*(y-left)/(right-left);
+    }
+    /* Equalizers and broad pulses are absent from the H-anchor list. In
+     * Full view their actual leading edges still locate the blanking lines. */
+    if (d->cvbs_mode && d->format==GUI_RF_NTSC && d->full_frame) {
+        for (int y=0; y<d->p.active_first; ++y) if (!anchors[y])
+            lines[y]=rf_cvbs_display_edge(d,lines[y]);
     }
     for (int y=0; y<rows; ++y)
         periods[y]=rf_clamp(lines[y+1]-lines[y], nominal*.8, nominal*1.2);

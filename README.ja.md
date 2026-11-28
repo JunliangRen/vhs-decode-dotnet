@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は [`v0.4.0-2.35.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.35.0)（application version `2.35.0`）です。
+現在の .NET port release は [`v0.4.0-2.36.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.36.0)（application version `2.36.0`）です。
 x64 バイナリには SSE4.2 と POPCNT を備えた [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements) が必要です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](docs/LD_PERFORMANCE_V16.md)。
